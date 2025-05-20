@@ -1,32 +1,42 @@
 import joblib
 import os
-from sklearn.preprocessing import MinMaxScaler
+from datetime import datetime
 from modelo.features import preparar_features_remitente
 from modelo.datos_remitente import DatosRemitenteViaje
 
-# Cargar modelo entrenado (puede ser el mismo que usas para el viajero)
-modelo_path = os.path.join(os.path.dirname(__file__), "modelo_remitente.pkl")
-modelo_remitente = joblib.load(modelo_path)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Función para predecir afinidad de una encomienda respecto a múltiples viajes
+modelo = joblib.load(os.path.join(BASE_DIR, "modelo_remitente.pkl"))
+scaler = joblib.load(os.path.join(BASE_DIR, "scaler_remitente.pkl"))
+
 def predecir_match_remitente(encomienda, viajes):
     X = []
     ids = []
 
-    for viaje in viajes:
-        datos = DatosRemitenteViaje(encomienda, viaje)
-        features = preparar_features_remitente(datos)
-        X.append(features)
-        ids.append(viaje.get("_id", ""))
+    print("✅ Encomienda recibida:", encomienda)
+    print("📦 Número de viajes recibidos:", len(viajes))
 
-    # Escalado normalizado
-    scaler = MinMaxScaler()
-    X_scaled = scaler.fit_transform(X)
+    for i, viaje in enumerate(viajes):
+        try:
+            print(f"🔹 Procesando viaje {i + 1}: {viaje}")
+            datos = DatosRemitenteViaje(encomienda, viaje)
+            features = preparar_features_remitente(datos)
+            X.append(features)
+            ids.append(viaje.get("_id", f"viaje_{i}"))
+        except Exception as e:
+            print(f"❌ Error al procesar viaje {i + 1}: {e}")
+            continue  # salta viajes inválidos sin detener todo
 
-    # Predicción de afinidad
-    predicciones = modelo_remitente.predict(X_scaled)
+    if not X:
+        raise ValueError("❌ No se pudo procesar ningún viaje válido.")
 
-    # Ensamblar resultados
+    try:
+        X_scaled = scaler.transform(X)
+        predicciones = modelo.predict(X_scaled)
+    except Exception as e:
+        print("❌ Error durante escalado o predicción:", e)
+        raise
+
     resultados = []
     for i, score in enumerate(predicciones):
         resultados.append({
@@ -34,9 +44,8 @@ def predecir_match_remitente(encomienda, viajes):
             "afinidad": round(float(score), 3),
             "ciudadOrigen": viajes[i]["ciudadOrigen"],
             "ciudadDestino": viajes[i]["ciudadDestino"],
-            "fechaViaje": viajes[i]["fechaViaje"],
-            "reputacion": viajes[i]["reputacion"]
+            "fechaViaje": viajes[i]["fechaViaje"]
         })
 
-    # Ordenar por mayor afinidad
+    print("✅ Predicciones generadas:", resultados)
     return sorted(resultados, key=lambda x: -x["afinidad"])
